@@ -28,17 +28,10 @@ get_prob <- function(genotype, bases, quality){
 prob_vec <- Vectorize(get_prob, vectorize.args = c("bases","quality"))
 
 # Expectation maximization for one position
-EMfreqStep <- function(p, bases_prob, theta_zero=NaN){
-  # Initialize theta with equal probabilities
+EMfreqStep <- function(p, bases_prob, theta_zero=rep(0.25, 4)){
+  # Initialization
   f <- rep(0)
-  if (is.na(theta_zero)){
-    fTemp <- rep(0.25, 4)
-  }
-  # Use alternative theta initialization
-  else{
-    fTemp <- theta_zero
-  }
-  # Set the iterations counter
+  fTemp <- theta_zero
   c <- 1
   # Iterate until convergence
   while(any(abs(f-fTemp) > 0.00001)){
@@ -83,6 +76,6 @@ sum(apply(thetas, 1, max) < 0.9)
 which(apply(thetas, 1, max) < 0.9)
 # Allele frequency across all sites
 tot_freq <- apply(thetas, 2, mean)
-
+tot_freq
 
 
