@@ -14,3 +14,5 @@ Reports and code for [Advanced Bioinformatics for NGS](https://kurser.ku.dk/cour
 * [Genotype calling](https://github.com/St3451/Advanced_Bioinformatics_for_NGS/blob/master/Assignment2/handin2_part1.pdf)
 * [eQTL analysis part 1](https://github.com/St3451/Advanced_Bioinformatics_for_NGS/blob/master/Assignment2/handin2_part2.1.pdf)
 * [eQTL analysis part 2 PDF](https://github.com/St3451/Advanced_Bioinformatics_for_NGS/blob/master/Assignment2/handin2_part2.2.pdf)
+* [eQTL analysis part 1](https://github.com/St3451/Advanced_Bioinformatics_for_NGS/blob/master/Assignment2/handin2_part2.1.pdf)
+* [eQTL analysis part 2](https://github.com/St3451/Advanced_Bioinformatics_for_NGS/blob/master/Assignment2/handin2_part2.2.pdf)
