@@ -1,0 +1,383 @@
+---
+title: "Handin 2 part2.2"
+author: "Stefano Pellegrini"
+date: "9/29/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{R, message=FALSE, warning=FALSE}
+library(MatrixEQTL)
+library(tidyverse)
+```
+
+# Part 2
+
+## Task 1 - First, we will explore the data.
+
+```{r}
+# Expression data for chromosome 20
+expr20 <- read.table("expr_ceu_chr20.tab", header = TRUE)
+expr20 <- column_to_rownames(expr20, var="id")
+dim(expr20)
+
+# Gene positions for genes on chromosome 20
+expr20_pos <- read.table("expr_chr20.pos", header = TRUE)
+dim(expr20_pos)
+
+# Genotype data for chromosome 20
+geno20 <- read.table("geno_ceu_chr20_strict.tab", header = TRUE)
+geno20 <- column_to_rownames(geno20, var="id")
+dim(geno20)
+
+# Position of genotype data for chromosome 20
+geno20_pos <- read.table("geno_ceu_chr20_strict.pos", header = TRUE)
+dim(geno20_pos)
+
+# Genotype data for chromosome 22
+geno22 <- read.table("geno_ceu_chr22_strict.tab", header = TRUE)
+geno22 <- column_to_rownames(geno22, var="id")
+dim(geno22)
+
+# Position of genotype data for chromosome 22
+geno22_pos <- read.table("geno_ceu_chr22_strict.pos", header = TRUE)
+dim(geno22_pos)
+```
+
+__1. How many samples are included in this dataset?__
+
+91 samples.
+
+__2. How many variants are present on chromosome 20?__
+
+30000 variants.
+
+__3. Generate a histogram of allele frequencies for chromosome 20.__
+
+```{r}
+# Compute MAF
+f20_alt <- apply(geno20, 1, function(x) mean(x[x > -1])) /  2
+f20_ref <- 1 - f20_alt
+maf20 <- data.frame(MAF = pmin(f20_alt, f20_ref))
+
+# Plot histogram of allele frequencies
+# Allele frequencies
+cbind(data.frame(f20_alt), data.frame(f20_ref)) %>% 
+  as_tibble() %>% 
+  gather(key = "allele", value = "freq",
+         f20_alt, f20_ref) %>%
+  ggplot(aes(x=freq)) + geom_histogram(col="black", fill="bisque2", binwidth = 0.05) + 
+  labs(title = "Chr 20 allele frequency distribution") +
+  ylab("Count") + 
+  xlab("Allele frequency") + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +  
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) + 
+  theme_bw()
+
+# Alternative and reference allele frequencies
+cbind(data.frame(f20_alt), data.frame(f20_ref)) %>% 
+  as_tibble() %>% 
+  gather(key = "allele", value = "freq",
+         f20_alt, f20_ref) %>%
+  ggplot(aes(x=freq)) + geom_histogram(col="black", fill="bisque2", binwidth = 0.05) + 
+  facet_wrap(~allele)  +
+  labs(title = "Chr 20 allele frequency distribution") +
+  ylab("Count") + 
+  xlab("Allele frequency") + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +  
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + 
+  theme_bw()
+
+```
+
+__4. What is the lowest allele frequency observed?__
+
+```{r}
+maf20 %>% arrange(MAF) %>% head(1)
+```
+
+The lowest allele frequency is 0.1538462.
+
+__5. How many genes are included?__
+
+561 genes are included in the data.
+
+__6. What gene shows the highest mean expression?__
+
+```{r}
+data.frame(mean_expr = apply(expr20, 1, mean)) %>% 
+  arrange(desc(mean_expr)) %>% head(1)
+```
+
+The gene with highest mean expression is ENSG00000227063.4.
+
+## Task 2 - cis-eQTL
+
+```{r}
+# Genotype file names
+SNP_file_name = "geno_ceu_chr20_strict.tab"           
+snps_location_file_name = "geno_ceu_chr20_strict.pos" 
+
+# Gene expression file names
+expression_file_name = "expr_ceu_chr20.tab"          
+gene_location_file_name = "expr_chr20.pos"           
+
+# Only associations significant at this level will be saved
+pvOutputThreshold_cis = 1;      # p.value threshold for cis eqtls
+pvOutputThreshold_tra = 0;      # p.value threshold for trans eqtls
+
+# Covariates file names
+covariates_file_name = character(); # Set to character() for no covariates
+
+# Distance for local gene-SNP pairs
+cisDist = 1e6;                  # Define cis distance
+
+# Load genotype data
+snps = SlicedData$new();
+snps$fileDelimiter = "\t";      # the TAB character
+snps$fileOmitCharacters = "NA"; # Denote missing values;
+snps$fileSkipRows = 1;          # One row of column labels
+snps$fileSkipColumns = 1;       # One column of row labels
+snps$fileSliceSize = 2000;      # Read file in slices of 2,000 rows
+snps$LoadFile(SNP_file_name);
+
+# Load gene expression data
+gene = SlicedData$new();
+gene$fileDelimiter = "\t";      # The TAB character
+gene$fileOmitCharacters = "NA"; # Denote missing values;
+gene$fileSkipRows = 1;          # One row of column labels
+gene$fileSkipColumns = 1;       # One column of row labels
+gene$fileSliceSize = 2000;      # Read file in slices of 2,000 rows
+gene$LoadFile(expression_file_name);
+
+# Load position files
+snpspos = read.table(snps_location_file_name, header = TRUE, stringsAsFactors = FALSE);
+genepos = read.table(gene_location_file_name, header = TRUE, stringsAsFactors = FALSE);
+
+# Run the analysis
+me = Matrix_eQTL_main(
+  snps = snps,
+  gene = gene,
+  output_file_name=NULL,
+  pvOutputThreshold = pvOutputThreshold_tra,
+  useModel = modelLINEAR,
+  errorCovariance =numeric(),
+  verbose = TRUE,
+  output_file_name.cis = NULL,    # Do not write out cis results
+  pvOutputThreshold.cis = pvOutputThreshold_cis,
+  snpspos = snpspos,
+  genepos = genepos,
+  cisDist = cisDist,
+  min.pv.by.genesnp = FALSE,
+  noFDRsaveMemory = FALSE,
+  pvalue.hist = FALSE)
+
+cis_eqtls = me$cis$eqtls[,-c(5)]
+cis_eqtls["beta_se"] = cis_eqtls["beta"]/cis_eqtls["statistic"]
+rm(me)
+```
+
+```{r}
+dim(cis_eqtls)
+```
+
+__1. How many tests were conducted?__
+
+527117 tests were performed.
+
+__2. Using a bonferroni correction ($\alpha = 0.05$), how many genes are significant?__
+
+```{r}
+# Add column with bonferroni correction
+cis_eqtls <- cbind(cis_eqtls, 
+                   p.adj = p.adjust(cis_eqtls$pvalue, method ="bonferroni"))
+
+# Filter for significant hits
+cis_eqtls %>% filter(p.adj < 0.05) %>% summarise(length(snps))
+```
+
+There are 71 gene-snp significant associations.
+
+__3. What gene-snp pair shows the lowest pvalue? What is the effect size of this snp-gene pair?__
+
+```{r}
+cis_eqtls %>% arrange(p.adj) %>% head(1)
+```
+
+The gene-snp pair that shows the lowest p-value is SNP 20_37055875 and ENSG00000196756.5 gene. The effect size of the snp-gene pair is -8.146604.
+
+__4. What is the biotype of this gene?__
+
+It is a small nucleolar RNA non-coding host gene.
+
+## Task 3 - trans-eQTL
+
+```{r}
+# Genotype file names
+SNP_file_name = "geno_ceu_chr22_strict.tab" ;           
+snps_location_file_name = "geno_ceu_chr22_strict.pos" ; 
+
+# Gene expression file names
+expression_file_name = "expr_ceu_chr20.tab" ;           
+gene_location_file_name = "expr_chr20.pos" ;         
+
+# Only associations significant at this level will be saved
+pvOutputThreshold_cis = 0;                   # p.value threshold for cis eqtls
+pvOutputThreshold_tra = 1;                   # p.value threshold for trans eqtls
+
+#Covariates file names
+covariates_file_name = character(); # Set to character() for no covariates
+
+# Distance for local gene-SNP pairs
+cisDist = 1e6;                      # Define cis distance
+
+## Load genotype data
+snps = SlicedData$new();
+snps$fileDelimiter = "\t";          # The TAB character
+snps$fileOmitCharacters = "NA";     # Denote missing values;
+snps$fileSkipRows = 1;              # One row of column labels
+snps$fileSkipColumns = 1;           # One column of row labels
+snps$fileSliceSize = 2000;          # Read file in slices of 2,000 rows
+snps$LoadFile(SNP_file_name);
+
+## Load gene expression data
+gene = SlicedData$new();
+gene$fileDelimiter = "\t";          # The TAB character
+gene$fileOmitCharacters = "NA";     # Denote missing values;
+gene$fileSkipRows = 1;              # One row of column labels
+gene$fileSkipColumns = 1;           # One column of row labels
+gene$fileSliceSize = 2000;          # Read file in slices of 2,000 rows
+gene$LoadFile(expression_file_name);
+
+#Load position files
+snpspos = read.table(snps_location_file_name, header = TRUE, stringsAsFactors = FALSE);
+genepos = read.table(gene_location_file_name, header = TRUE, stringsAsFactors = FALSE);
+
+## Run the analysis
+me = Matrix_eQTL_main(
+  snps = snps,
+  gene = gene,
+  output_file_name=NULL,
+  pvOutputThreshold = pvOutputThreshold_tra,
+  useModel = modelLINEAR,
+  errorCovariance =numeric(),
+  verbose = TRUE,
+  output_file_name.cis = NULL,      # Do not write out cis results
+  pvOutputThreshold.cis = pvOutputThreshold_cis,
+  snpspos = snpspos,
+  genepos = genepos,
+  cisDist = cisDist,
+  min.pv.by.genesnp = FALSE,
+  noFDRsaveMemory = FALSE,
+  pvalue.hist = FALSE)
+
+trans_eqtls = me$all$eqtls[,-c(5)]
+trans_eqtls["beta_se"] = trans_eqtls["beta"]/trans_eqtls["statistic"]
+rm(me)
+```
+
+__1. How many tests were conducted?__
+
+```{r}
+dim(trans_eqtls)
+```
+
+561561 tests were conducted.
+
+__2. Using a bonferroni correction ($\alpha = 0.05$), how many genes are significant?__
+
+```{r}
+# Add column with bonferroni correction
+trans_eqtls <- cbind(trans_eqtls, 
+                     p.adj = p.adjust(trans_eqtls$pvalue, method ="bonferroni"))
+
+# Filter for significant hits
+trans_eqtls %>% filter(p.adj < 0.05) %>% summarise(length(snps))
+```
+
+There aren't any significant associations.
+
+## Task 4 - QQ-plot
+
+```{r}
+qqp <- function(x, title = NaN, maxLogP = 30, ...){
+  x <- x[!is.na(x)]
+  if(!missing(maxLogP)){
+    x[x < 10^-maxLogP] <- 10^-maxLogP
+  }
+  
+  N <- length(x)
+  chi1 <- qchisq(1 - x, 1)
+  x <- sort(x)
+  e <- -log((1:N - 0.5) / N, 10)
+  plot(e, -log(x, 10), 
+       ylab = "Observed log10(p-value)", 
+       xlab = "Expected log10(p-value)",
+       main = title,
+       ...)
+  abline(0, 1, col = 2, lwd = 2)
+  c95 <- qbeta(0.95, 1:N, N - (1:N) + 1)
+  c05 <- qbeta(0.05, 1:N, N - (1:N) + 1)
+  lines(e, -log(c95, 10))
+  lines(e, -log(c05, 10))
+}
+```
+
+__1. Briefly explain what a QQ-plot can be used for (2-3 sentences)__
+
+A QQ-plot is a scatter plot where the quantiles of one dataset is plotted against the quantiles of another one. The plot is used to visually compare the two distributions. If both sets of quantiles come from the same or similar distributions, the plot will approximately match the diagonal line $y = x$. Also, many distributional aspects can be visually tested, and in particular, in eQTL analysis it can be useful to check for the presence of population stratification, filtering bias, polygenicity, p-values inflation, batch effect, or other bias in the data.
+
+__2. Compute the QQ-plot for both the cis and trans eqtl separately__
+
+```{r}
+qqp(cis_eqtls$pvalue, title= "QQ-plot cis-eQTL")
+qqp(trans_eqtls$pvalue, title= "QQ-plot trans-eQTL")
+```
+
+__3. Explain the plots__
+In the case of eQTL analysis we are plotting the $\log_{10}$ of the observed p-values against the $\log_{10}$ p-values distribution that we would expect to have by chance (if there is no significant association between gene-SNP pairs), which is approximated using the beta distribution. Therefore the p-values above the diagonal line are the significant ones, while the ones that match it, or that fall within the confidence interval bounds, are not small enough to be significant. 
+
+__4. What is the main difference between these two QQ-plots?__
+We can see that the QQ plot of the cis-eQTL p-values shows a deviation from the diagonal line on the right side, the p-values above the diagonal line are the significant ones (after Bonferroni correction), and the most signifcant hit is located at the top right corner. While in the trans-eQTL QQ plot, as expected, the distribution of the observed p-values matches the expected ones, meaning that no significant gene-SNP pair association was found.
+
+__5. Explain what drives this?__
+It is likely that there is a larger number of significant associations between genes and closely located SNPs, compared to the associations that can be found betwen genes and distant located SNPs. In fact, a mutation close to a gene is more likely to have an influence on its expression, compared to a mutation that occurred far from it. This is especially true when the gene and the SNPs are located on different chromosomes (in our case chromosome 20 and chromosome 22). Therefore, for this reason and for other technical aspects, finding distant trans eQTLs is more challenging and requires many more tests. 
+
+## Task 5 - PVE
+
+__1. Calculate the PVE for all cis SNP-gene pairs and make a histogram of them__
+
+```{r}
+# Compute the PVE for all cis SNP-gene pairs
+N = 91
+cis_eqtls %>% 
+  mutate(maf = maf20[snps,1]) %>% 
+  mutate(pve = (2* (beta^2) * maf * (1 - maf)) / 
+    (2 * (beta^2) * maf * (1 - maf) + (beta_se^2) * 2 * N * maf * (1 - maf))) -> cis_eqtls_pve
+
+# PVE histogram
+cis_eqtls_pve %>% as_tibble() %>% 
+  ggplot(aes(x=pve)) + geom_histogram(col="black", fill="bisque2", binwidth = 0.025) + 
+  labs(title = "Cis SNP-gene PVE distribution") +
+  ylab("Count") + 
+  xlab("PVE") + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +  
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) + 
+  theme_bw()
+```
+
+__2. What gene has the highest PVE__
+
+```{r}
+cis_eqtls_pve %>% arrange(desc(pve)) %>% head(1)
+
+maf20["snp_20_37055875",]
+```
+
+The gene-snp pair with the highest PVE is gene ENSG00000196756.5, associated with SNP 20_37055875.
+
+__3. what other factors can explain the remaining variance (mention 2)?__
+
+The remaining variance can be explained by the influence of several other SNPs to the gene expression, but also by environmental factors, confounders, noise and bath effect.
+

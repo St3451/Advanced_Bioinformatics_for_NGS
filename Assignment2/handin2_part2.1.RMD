@@ -1,0 +1,409 @@
+---
+title: "Handin 2 part 2.1"
+author: "Stefano Pellegrini"
+date: "9/27/2020"
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+---
+
+```{R, message=FALSE, warning=FALSE}
+library(MatrixEQTL)
+library(tidyverse)
+```
+
+# Part 1
+
+## Task 1
+
+__a. What do the -1,0,1,2 values represent in the sub_geno.tab file?__  
+-1 rapresent a missing genotype, 0 rapresents the homozygous reference genotype (e.g. AA), 1 is the heterozygous genotype (e.g. AB), and 2 rapresents the homozygoues alternative genotype (e.g. BB).  
+
+__b. What is sored in the sub_expr.tab file and what has been done with this data?__  
+It stores the expression of 32 genes across 462 samples. The expression data has been normalized (FPKM) and it is ready to use.
+
+__c. What information is stored in the design.txt file?__   
+It stores usuful information about the sample (samples metadata), such as organism, strain, population, phase of the project when genotype was performed, the laboratory where sequencing occurred (useful for batch effect evaluation), and other. 
+
+```{r}
+# Explore data
+geno <- read.table("sub_geno.tab")
+dim(geno)
+geno[c(1:5),c(1:7)]
+
+expr <- read.table("sub_expr.tab")
+dim(expr)
+expr[c(1:5),c(1:5)]
+
+design_matrix <- read.table("design.tab", sep="\t") 
+dim(design_matrix)
+
+colnames(design_matrix)[colnames(design_matrix) == "Characteristics.population."] = "Pop"
+colnames(design_matrix)[colnames(design_matrix) == "Characteristics.Organism."] = "Organism"
+colnames(design_matrix)[colnames(design_matrix) == "Factor.Value.laboratory."] = "Lab"
+colnames(design_matrix)[colnames(design_matrix) == "Characteristics.Strain."] = "Strain"
+design_matrix[c(1:5),c(1,4,5,7)]
+```
+
+## Task 2
+
+__a. Calculate the number of missing genotypes for each SNP across all individuals.__
+
+```{r}
+missing <- apply(geno == -1, 1, sum)
+```
+
+__b. Calculate the minor allele frequency (MAF) for all SNPs across all individuals.__
+
+```{r}
+# MAF method 1
+# Compute the count of each allele
+pp <- apply(geno==0, 1, sum)
+pq <- apply(geno==1, 1, sum)
+qq <- apply(geno==2, 1, sum)
+# Total number of genotypes
+n <- pp + pq + qq
+# Allele frequencies
+p <- ((2*pp) + pq)/(2*n)
+q <- 1 - p
+# MAF
+maf1 <- pmin(p, q)
+maf1 <- data.frame(maf1)
+
+# MAF method 2 
+f_alt <- apply(geno, 1, function(x) mean(x[x > -1])) /  2
+f_ref <- 1 - f_alt
+maf <- data.frame(MAF = pmin(f_alt, f_ref))
+```
+
+__c. Filter our SNPs that have missing genotypes or a MAF<0.05 and use the filtered snps for the rest of the exercise.__
+
+```{r}
+filtered_geno <- geno[(missing == 0) & (maf >= 0.05),] 
+dim(filtered_geno)
+```
+
+We removed all SNPs with missing genotype and low MAF because it is very difficul to see if there is a change in these SNPs. 
+
+__d. Calculate the MAF for africans and non-africans separately. Is there a difference?__
+
+```{r}
+# Africans
+f_alt <- apply(geno[,design_matrix$Pop == "YRI"], 1, function(x) mean(x[x > -1])) /  2
+f_ref <- 1 - f_alt
+maf_YRI <- data.frame(MAF_YRI = pmin(f_alt, f_ref))
+
+# Non africans
+f_alt <- apply(geno[,design_matrix$Pop != "YRI"], 1, function(x) mean(x[x > -1])) /  2
+f_ref <- 1 - f_alt
+maf_noYRI <- data.frame(MAF_noYRI = pmin(f_alt, f_ref))
+```
+
+
+```{r}
+# Histogram MAF at each SNP 
+bind_cols(maf_noYRI, maf_YRI) %>% 
+  gather(key = "Pop", value = "maf", MAF_noYRI, MAF_YRI) %>%
+  ggplot(aes(x=c(seq(39),seq(39)), y=maf, fill=Pop)) +
+  geom_bar(stat = "identity", position = "dodge", col = "black") +
+  labs(title = "MAF for african and non african at each SNP", color = "Population") +
+  ylab("MAF") + 
+  xlab("SNP") + 
+  scale_fill_hue(labels = c("Non african", "African")) + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +  
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) + 
+  theme_bw() 
+
+# Histogram MAF distribution
+bind_cols(maf_noYRI, maf_YRI) %>% 
+  gather(key = "Pop", value = "maf", MAF_noYRI, MAF_YRI) %>% 
+  ggplot(aes(x=maf)) + 
+  geom_histogram(aes(fill=Pop), position = "dodge", col="black", binwidth = 0.05) +
+  labs(title = "MAF distribution for african and non african", fill = "Population") +
+  ylab("Count") + 
+  xlab("MAF") + 
+  scale_fill_hue(labels = c("Non african", "African")) + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +  
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) + 
+  theme_bw()
+```
+
+There is a difference in the MAF of africans and non africans.
+
+
+## Task 3: Gene expression profiles
+
+__a. Plot the distribution of expression levels across all samples for the ENSG00000172404.4 gene.__
+
+```{r}
+gene = ("ENSG00000172404.4")
+snps = c("snp_22_41256802", "snp_22_45782142")
+
+# Gene expression across all samples
+expr[gene,] %>% t() %>% as_tibble() %>% 
+  ggplot(aes(x=get(gene))) + geom_histogram(col="black", fill="bisque2", binwidth = 0.05) + 
+  labs(title = paste("Gene expression profile:", gene)) +
+  ylab("Count") + 
+  xlab("Expression") + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +  
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) + 
+  theme_bw()
+```
+
+__b. Plot the expression levels of ENSG00000172404.4 against the genotypes of snp_22_41256802 and snp_22_45782142.__
+
+```{r}
+# Convert to long format for plotting
+exprLong <- rownames_to_column(data.frame(t(expr[gene,])), var = "sample")
+colnames(exprLong)[2] = "expression"
+snpLong <- data.frame(t(filtered_geno[snps,])) %>% 
+  as_tibble() %>% 
+  gather(key = "snp", value = "genotype", snp_22_41256802, snp_22_45782142) 
+dataLong <- bind_cols(snpLong, bind_rows(exprLong, exprLong))
+dataLong$genotype <- as.factor(dataLong$genotype)
+
+# Plot
+dataLong %>% ggplot(aes(x=genotype, y=expression)) + 
+  geom_jitter(aes(colour=genotype), alpha=0.8, position=position_jitter(width=0.25)) + 
+  geom_boxplot(outlier.size=0, fill="grey", alpha=0.7) +
+  facet_wrap(~snp) + 
+  labs(title = paste(gene, "gene expression across two SNPs genotypes")) + 
+  theme_bw() + 
+  theme(legend.position = "none")
+```
+
+We can see that there is a clear variation in the expression of the gene across the first SNP genotype, but not in the second one.
+
+## Task 4: Do a linear regression of all sample genotypes on sample gene expression   
+ 
+__a. For snp_22_41256802 on ENSG00000172404.4__  
+__b. For snp_22_45782142 on ENSG00000172404.4__  
+
+```{r}
+expr_t <- t(expr)
+geno_t <- t(filtered_geno)
+model_a = lm(expr_t[,"ENSG00000172404.4"] ~ geno_t[,"snp_22_41256802"])
+summary(model_a)
+```
+
+
+```{r}
+model_b = lm(expr_t[,"ENSG00000172404.4"] ~ geno_t[,"snp_22_45782142"])
+summary(model_b)
+```
+
+## Questions 1-4:
+
+__1. What do the -1,0,1,2 values represent in the sub_geno.tab file? (same as Task 1a)__  
+-1 rapresent a missing genotype, 0 rapresents the homozygous reference genotype (e.g. AA), 1 is the heterozygous genotype (e.g. AB), and 2 rapresents the homozygoues alternative genotype (e.g. BB).  
+
+__2. What information is stored in the design.txt file? (same as Task 1c)__  
+It stores usuful information about the sample (samples metadata), such as organism, strain, population, phase of the project when genotype was performed, the laboratory where sequencing occurred (useful for batch effect evaluation), and other. 
+
+__3. Explain the results from the linear model in Task 4. What are the important values to look at and what do they tell you?__    
+In model a, there is a a significant positive linear relationship between the gene expression (response variable) and the SNP 22_41256802 (predictor variable). Meaning that the presence of the SNP alternative allele is associated with an increase of gene expression. While, in model b, there isn't enough evidence to state that there is a relationship between the gene expression and the SNP 22_45782142.
+The most important values to look at are: the p-values and the estimate of SNP coefficients. The p-value tells us if there is a significative linear relationship between the two variables. In other words, it tells us how likely is to observe such data, under the assumption that the null hypothesis is true. Where the null hypothesis states that the value of the coefficient (effect size) is 0. The estimates provide information about the size and the direction of the effect that the predictor variable has on the response variable. Also, other important values to look at are the standard error of the estimate, and the t-value, which can be thought of as a measure of the precision for the estimated coefficients values. Lastly, another important value is the R squared, which provides information about the fit of the model. Model a shows a good fit with an R squared value of 0.5, while model b has a bad fit showing a value of 0.002.
+
+## Task 5: Do a linear regression for snp_22_43336231 on ENSG00000100266.11
+
+__a. Without covariates.__
+
+```{r}
+model = lm(expr_t[,"ENSG00000100266.11"] ~ geno_t[,"snp_22_43336231"])
+summary(model)
+```
+
+__b. Using the genotype PCs from pc_cvrt.tab as covariates.__
+
+```{r}
+geno_pcs <- read.table("pc_cvrt.tab")
+
+model = lm(expr_t[,"ENSG00000100266.11"] ~ geno_t[,"snp_22_43336231"] + ., data = geno_pcs)
+summary(model)
+```
+
+__c. Separately for african and non-africans without covariates. Hint: Use the information in the design.tab.__
+
+```{r}
+# Africans
+model = lm(expr_t[design_matrix$Pop == "YRI","ENSG00000100266.11"] ~ 
+             geno_t[design_matrix$Pop == "YRI","snp_22_43336231"])
+summary(model)
+
+# Non africans
+model = lm(expr_t[design_matrix$Pop != "YRI","ENSG00000100266.11"] ~ 
+             geno_t[design_matrix$Pop != "YRI","snp_22_43336231"])
+summary(model)
+```
+
+__d. Make a dotplot of PC1 vs PC2 and color the dots by population.__ 
+
+```{r}
+geno_pcs %>% ggplot(aes(x=PC1, y=PC2, col=design_matrix$Pop)) + 
+  geom_point(alpha=0.6) + 
+  labs(title = "PCA plot genotypes", color = "Population") + 
+  theme_bw()
+```
+
+## Questions 5:
+__1. Is there a difference in your results in a and b? If so explain why.__  
+
+It doesn't seem to be a difference between the two models. That's because the PCs added as covariates in the second model show a weak or no association with the gene expression. While in both models, there is a strong positive linear relationshiop between the response variable and the SNP. To assess if there is a significative difference between the two models, a statistical test, such as the likelihood ratio test (LRT), could be performed. Neverthless, since in the model b the PCs of the populations genotypes were included as covariates, this model explains a larger proportion of the gene expression variance with respect to one explained by model a. 
+
+__2. Is there a difference between african and non-africans? If so explain why.__
+
+There is a difference between african and non-african. In fact, there is a significative positive association between the gene expression and the SNP genotypes in non africans, while there isn't a significative association in africans. Indeed, according to the "Out of Africa" model, the modern Homo sapiens originated in Africa, and then it migrated across the globe. Therefore, the non-african populations were subjected to a drastic bottleneck and to different selection pressures in respect to the african ones. Also, in the plots produced in Task 2d, it is possible to observe that the two groups shown a different minor allele frequencies.
+
+__3. What are we including in our model with the pc_cvrt.tab?__  
+
+We are including the principal components (PCs) of the populations genotypes obtained by eigendecomposition (principal component analysis). The PCs are the extracted features rapresenting a linear combination of the population genotypes that captured the largest variance in the data.
+
+
+## Task 6: Do a linear regression on 1st snp on 1st gene, 2nd snp on 2nd gene etc.  
+
+__a. Create a matrix containing the gene_id, snp_id, effect size, t.value and p.value.__  
+__b. Do a multiple testing correction on the resulting p.values using fdr.__ 
+
+```{r}
+# Function to perform linear regresion of n_th snp on n_th gene expression. 
+pairwise_lm <- function(n){
+  model <- lm(expr_t[,n] ~ geno_t[,n])
+  lm_summary <- summary(model)
+  row <- data.frame(gene=colnames(expr_t)[n], 
+                    snp=colnames(geno_t)[n], 
+                    t(lm_summary$coefficients[2,-2]))
+  colnames(row)[5] <- "p.value"
+  return(row)
+}
+
+# Create a data frame storing gene_id, snp_id, effect size, t.value and p.value
+df_lm <- data.frame(gene=character(0), 
+                    snp=character(0), 
+                    estimate=numeric(0), 
+                    t.value=numeric(0), 
+                    p.value=numeric(0))
+for (n in seq(dim(expr_t)[2])){
+  df_lm[n,] <- pairwise_lm(n)
+}
+
+# Multiple testing correction
+df_lm <- cbind(df_lm, p.adj=p.adjust(df_lm$p.value, method ="fdr"))
+df_lm %>% arrange(p.adj) %>% head(10)
+```
+
+__c. Do the same but now include the genotype PCs from pc_cvrt.tab as covariates.__
+
+```{r}
+# Function
+pairwise_lm_covariates <- function(n){
+  model <- lm(expr_t[,n] ~ geno_t[,n] + ., data=geno_pcs)
+  lm_summary <- summary(model)
+  row <- data.frame(gene=colnames(expr_t)[n], 
+                    snp=colnames(geno_t)[n], 
+                    t(lm_summary$coefficients[2,-2]))
+  colnames(row)[5] <- "p.value"
+  return(row)
+}
+
+# Make df
+df_lm_covariates <- data.frame(gene=character(0), 
+                               snp=character(0), 
+                               estimate=numeric(0), 
+                               t.value=numeric(0), 
+                               p.value=numeric(0))
+for (n in seq(dim(expr_t)[2])){
+  df_lm_covariates[n,] <- pairwise_lm_covariates(n)
+}
+
+# Multiple testing correction
+df_lm_covariates <- cbind(df_lm_covariates, 
+                          p.adj=p.adjust(df_lm_covariates$p.value, method ="fdr"))
+head(df_lm_covariates, 10)
+```
+
+__d. Plot the most significant hit.__  
+
+```{r}
+best_hit <- df_lm_covariates %>% as_tibble() %>% arrange(p.adj) %>% head(1)
+best_hit
+
+# Convert to long format for plotting
+exprLong <- rownames_to_column(data.frame(t(expr[best_hit$gene,])), var = "sample")
+colnames(exprLong)[2] = "expression"
+snpLong <- data.frame(t(filtered_geno[best_hit$snp,])) %>% 
+  as_tibble() %>% 
+  gather(key = "snp", value = "genotype", paste(best_hit$snp))
+dataLong <- bind_cols(snpLong, exprLong)
+dataLong$genotype <- as.factor(dataLong$genotype)
+
+# Plot
+dataLong %>% ggplot(aes(x=genotype, y=expression)) + 
+  geom_jitter(aes(colour=genotype), alpha=0.8, position=position_jitter(width=0.25)) + 
+  geom_boxplot(outlier.size=0, fill="grey", alpha=0.7) + 
+  labs(title = paste("Most significative hit, gene expression across SNP genotypes")) + 
+  ylab(paste("Gene expression (", best_hit$gene, ")", sep = "")) + 
+  xlab(paste("Genotype (", best_hit$snp, ")", sep = "")) + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +  
+  theme_bw() + 
+  theme(legend.position = "none")
+```
+
+## Questions 6:  
+
+__1. How many tests did you perform in a? and c?__  
+
+We performed 32 tests in both cases. 
+
+__2. What are you correcting for with the fdr? Why is this important for eQTL analysis?__  
+
+We are correcting for the false discovery of significant hits, or in other words, we are penalizing the p-values in order to reduce the rate of type I error (the p-values being significant by chance) when performing multiple tests. This is important when a large number of tests is performed, e.g. in eQTL analysis, where a large number of gene-SNP pairs are tested for association between gene expression and SNP allelic configuration. 
+
+__3. Is there a difference in number of significant hits (FDR<0.05) in the two models?__  
+
+No, the number of significant hits is 6 in both models.
+
+```{r}
+# Significant hits first model
+df_lm %>% filter(p.adj < 0.05) %>% arrange(p.adj)
+
+# Significant hits second model
+df_lm_covariates %>% filter(p.adj < 0.05) %>% arrange(p.adj)
+```
+
+## Task 7: Use this Matrix_eQTL_main function to do eQTL analysis on the data.
+
+```{r}
+snps <- SlicedData$new()
+snps$CreateFromMatrix(as.matrix(filtered_geno))
+genes <- SlicedData$new()
+genes$CreateFromMatrix(as.matrix(expr)) 
+
+snp_pos <- read.table("sample_geno.pos", sep="\t",header=T)
+snp_pos <- snp_pos[snp_pos$snp %in% row.names(filtered_geno),]
+gene_pos <- read.table("sample_expr.pos", sep="\t",header=T)
+all(colnames(snps) == colnames(genes))
+
+eQTL <- Matrix_eQTL_main(snps, genes, output_file_name=NULL,
+output_file_name.cis=NULL,
+pvOutputThreshold.cis=1, pvOutputThreshold=1,
+snpspos=snp_pos, genepos=gene_pos,
+cisDist = 0)
+```
+
+## Questions 7:  
+
+__1. How many tests were performed in the eQTL analysis?__
+
+eQTL analysis performed 1024 tests because it tested all possible combination of gene-SNP pairs.
+
+__2. Compare the results from MatrixeQTL to your results from Task 6 a and b. Explain any similarities and/or differences that you see.__
+
+```{r}
+# Significant hits eQTL analysis
+eQTL$trans$eqtls %>% as_tibble %>% filter(FDR < 0.05) %>% arrange(FDR)
+```
+
+The model built without using the PCs as covariates had a different p-values than the one built using the covariates, but both found 6 significative associations on the 32 gene-SNP pairs we tested. The matrixeQTL analysis found 10 significative associations, but that is because it performed 1024 tests, testing all possible combinations of gene-SNP pairs. Therefore it tested several combination that were not included in the models built in Task 6. Furthermore, the most significant hit found by eQTL analysis was found also by the models built in Task 6 a and b. Also, we can see that, except for the gene-SNP associations that were not tested in Task 6 a, and for the FDR values, the results of the eQTL analysis and the model built in Task 6 are the identical. The difference in the FDR values is due to the fact that a larger number of tests were performed in MatrixeQTL (1024 versus 32), therefore the p-values were more penalized.
+
+
