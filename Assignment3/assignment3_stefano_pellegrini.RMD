@@ -1,0 +1,403 @@
+---
+title: "Assignment3"
+author: "Stefano Pellegrini"
+date: "10/21/2020"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r echo=FALSE, results="hide",message=FALSE, warning=FALSE}
+library(plyr)
+library(ggplot2)
+library(reshape2)
+library(Biostrings)
+library(tidyverse)
+library(RColorBrewer)
+
+base_dir <- "./"
+
+colnames.by.AA <- c("G", "A", "V", "L", "I", "M", "F", "W", "P", "S", "T", "C", "Y", "N", "Q", "D", "E", "K", "R", "H")
+
+Sarkisyan.file <- paste(base_dir, "nt_sequences_to_brightness.csv", sep="/")
+Sarkisyan.data <- read.csv(Sarkisyan.file, stringsAsFactors = F)
+
+nativeDNA <- "AGCAAGGGCGAGGAGCTGTTCACCGGGGTGGTGCCCATCCTGGTCGAGCTGGACGGCGACGTAAACGGCCACAAGTTCAGCGTGTCCGGCGAGGGCGAGGGCGATGCCACCTACGGCAAGCTGACCCTGAAGTTCATCTGCACCACCGGCAAGCTGCCCGTGCCCTGGCCCACCCTCGTGACCACCCTGTCGTACGGCGTGCAGTGCTTCAGCCGCTACCCCGACCACATGAAGCAGCACGACTTCTTCAAGTCCGCCATGCCCGAAGGCTACGTCCAGGAGCGCACCATCTTCTTCAAGGACGACGGCAACTACAAGACCCGCGCCGAGGTGAAGTTCGAGGGCGACACACTAGTGAACCGCATCGAGCTGAAGGGCATCGACTTCAAGGAGGACGGCAACATCCTGGGGCACAAGCTGGAGTACAACTACAACAGCCACAACGTCTATATCATGGCCGACAAGCAGAAGAACGGCATCAAGGTGAACTTCAAGATCCGCCACAACATCGAGGACGGCAGCGTGCAGCTCGCCGACCACTACCAGCAGAACACCCCCATCGGCGACGGCCCCGTGCTGCTGCCCGACAACCACTACCTGAGCACCCAGTCCGCCCTGAGCAAAGACCCCAACGAGAAGCGCGATCACATGGTCCTGCTGGAGTTCGTGACCGCCGCCGGGATCACTCACGGCATGGACGAGCTGTACAAGTGA"
+nativeProtein <- translate(DNAString(nativeDNA))
+```
+
+
+## Task 1: quality control and translation
+
+```{r echo=FALSE, results="hide",message=FALSE}
+# Step 1 and 2
+clean_data <- function(ngs, dna_wt, threshold = 0){
+  # Filter by occurrence
+  n0 <- nrow(ngs)
+  if (threshold > 0){
+    ngs <- ngs[ngs$occurrence > threshold,]
+  }
+  n1 <- length(ngs$sequence)
+  writeLines("\n")
+  print(paste("Filtered", n0 - n1, "out of", n0,"sequences by occurrence"))
+  # Filter seq for different length, gaps, and non DNA letters
+  len_filter <- nchar(ngs$sequence) == nchar(dna_wt)
+  gaps_filter <- !grepl("-", ngs$sequence, fixed = TRUE)
+  nondna_filter <- !grepl("[^ACGT]", ngs$sequence, ignore.case = TRUE)
+  ngs <- ngs[which(len_filter & gaps_filter & nondna_filter),]
+  n2 <- length(ngs$sequence)
+  print(paste("Filtered", n1 - n2, "out of", n1,"sequences in DNA space"))
+  # Filter for premature stop codon
+  ngs$protein <- as.character(sapply(ngs$sequence, function(x) toString(translate(DNAString(x)))))
+  stop_filter <- !grepl("[*](?!$)", ngs$protein, perl = TRUE)
+  ngs <- ngs[stop_filter,]
+  n3 <- length(ngs$protein)
+  print(paste("Filtered", n2 - n3, "out of", n2,"sequences in protein space"))
+  print(paste("Obtained", n3, "sequence after filtering", n0 - n3, "out of", n0))
+  return(ngs)
+}
+
+ngs_data <- clean_data(Sarkisyan.data, nativeDNA) 
+
+# Unique barcodes and unique proteins after clean-up
+writeLines("\n")
+paste("After clean-up there are", nrow(ngs_data), 
+      "unique barcodes and", length(unique(ngs_data$protein)), "unique proteins")
+
+# Save proteins obtained by synonymous mutations (needed in Task 2)
+synonymous_mut <- ngs_data[ngs_data$protein == as.character(nativeProtein),]
+
+# Merge the sequences that yelded the same protein sequences (using error propagation)
+ngs_temp <- ngs_data %>% group_by(protein) %>% 
+            summarise(uniqueBarcodes = sum(uniqueBarcodes), 
+            medianBrightness = mean(medianBrightness), 
+            stdErr = (1 / length(stdErr[!is.na(stdErr)])) * sqrt(sum(stdErr[!is.na(stdErr)]^2)))
+ngs_data$uniqueBarcodes <- sapply(ngs_data$protein, function(x) ngs_temp$uniqueBarcodes[x == ngs_temp$protein])
+ngs_data$medianBrightness <- sapply(ngs_data$protein, function(x) ngs_temp$medianBrightness[x == ngs_temp$protein])
+ngs_data$stdErr <- sapply(ngs_data$protein, function(x) ngs_temp$stdErr[x == ngs_temp$protein])
+
+ngs_data <- distinct(ngs_data[,-1])
+
+# Unique barcodes and unique proteins after merging the proteins with the same sequence 
+paste("After merging duplicate proteins there are", nrow(ngs_data), 
+      "unique barcodes and", length(unique(ngs_data$protein)), "unique proteins")
+
+# Most common protein other than WT
+ngs_data %>% filter(protein != as.character(nativeProtein)) %>% arrange(desc(uniqueBarcodes)) %>% head(1)
+```
+
+__Quality control: remove sequences that are too long, too short, or have gaps. Then, remove sequences with premature STOP codons. How many unique barcodes (=DNA variant sequences) are found? How many unique protein sequences after cleanup? What is the most common protein sequence that is not wild-type? Include your answers in your hand-in.__
+
+After initial clean-up there are 56087 (DNA variant sequences) unique barcodes and 51716 unique proteins, so several DNA sequences that resulted in the same protein are present in the data. After merging the proteins duplicates (obtained from different DNA sequences), there are 51716 unique barcodes and 51716 unique proteins.    
+The most common protein (different from the wild-type) occurred 59 times, it has a median brightness of 3.698481, and it has the following sequence:   
+SKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTLVTT  
+LSYGVQCFSRYPDHMKQHDFLKSAMPE GYVQERTIFFKDDGNYKTRAEVKFEGDTLVNRIE   
+LKGIDFKEDGNILGHKLEYNYNSHNVYIMADKQKNGIKVNFKIRHNIEDGSVQLADHYQQNT  
+PIGDGPVLLPDNHYLSTQSALSKDPNEKRDHMVLLEFVTAAGITHGMDELYK*.   
+
+
+## Task 2: protein-level variants
+
+```{r echo=FALSE, results="hide", message=FALSE}
+get_diff <- function(ngs, protein_wt){
+  # Split to a vector of characters
+  wt_seq = strsplit(as.character(protein_wt), split = "")[[1]]
+  mut_seq = strsplit(as.character(ngs["protein"]), split = "")[[1]]
+  # Generate a df storing a summary of the mutation (Pos, WT AA, Mut AA, Brightness, Error, N mut, Mut ID)
+  df_mut <- data.frame(WT=character(0), Mut=character(0), Bright=numeric(0), Err=numeric(0), N_mut=numeric(0))
+  if (sum(wt_seq != mut_seq) > 0){                            
+    i = which(wt_seq != mut_seq)                                   
+    n_mut <- length(i)
+    df_mut[i,] <- c(wt_seq[i],                                              # WT aa
+                    mut_seq[i],                                             # Mut AA
+                    rep(ngs["medianBrightness"], n_mut),                    # Brightness
+                    rep(ngs["stdErr"], n_mut),                              # Error
+                    rep(n_mut, n_mut))                                      # N mut  
+    # Remove the generated NA rows
+    df_mut <- rownames_to_column(df_mut[!is.na(df_mut$Mut),], var = "Pos")  # Pos
+    # Create mut ID as position and WT AA
+    df_mut$Mut_ID <- paste(df_mut$WT, df_mut$Pos, df_mut$Mut, sep = "")     # Mut ID
+    # Some variables changed to character type
+    df_mut$Bright <- as.numeric(df_mut$Bright)
+    df_mut$Err <- as.numeric(df_mut$Err)
+    df_mut$N_mut <- as.numeric(df_mut$N_mut)
+    df_mut$Pos <- as.numeric(df_mut$Pos)
+    return(df_mut) 
+  }
+}
+
+# Function to get the summary of the mutations for all sequences
+mut_summary <- function(ngs, protein_wt){
+  mut_summary <- apply(ngs, 1, function(x) get_diff(ngs = x, protein_wt = protein_wt))
+  return(arrange(bind_rows(mut_summary), Pos))
+}
+
+summary_df <- mut_summary(ngs = ngs_data, protein_wt = nativeProtein)
+
+# Control sequence 
+summary_control <- summary_df[summary_df$N_mut == 1,]
+
+# Compute average brightness across all contexts (using error propagation)
+bright_df <- summary_df %>% group_by(Mut_ID) %>% 
+             summarise(avg_bright = mean(Bright), 
+                       prop_err = (1 / length(Err[!is.na(Err)])) * sqrt(sum(Err[!is.na(Err)]^2)))
+summary_df$Avg_bright <- sapply(summary_df$Mut_ID, function(x) bright_df$avg_bright[x == bright_df$Mut_ID])
+summary_df$Prop_err <- sapply(summary_df$Mut_ID, function(x) bright_df$prop_err[x == bright_df$Mut_ID])
+
+# Merge duplicates in the main dataframe
+summary_df <- distinct(select(summary_df, -Bright, -Err, -N_mut) %>% arrange(Pos))
+```
+
+__Next, determine differences to the native protein sequence. For simplicity we will consider each position independently. We also want to average the brightness across all contexts. As a control for the averaged data across different sequences, create a subset of the dataset where only single-mutation sequences are considered. Compare the medianBrightness of those single-mutant sequences to the averaged data you created above. Include the stdErr in the plot, using geom_errorbar() and geom_errorbarh(). Are the deviations you observe beyond what you expect based on the experimental error? Submit plot and discussion as part of your hand-in.__
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Scatter plot
+X <- select(summary_control, Pos, Mut_ID, Bright, Err) %>% arrange(Mut_ID)
+Y <- select(summary_df, Mut_ID, Avg_bright, Prop_err) %>% 
+  filter(Mut_ID %in% X$Mut_ID) %>% arrange(Mut_ID) %>% select(-Mut_ID)
+XY <- cbind(X, Y) %>% arrange(as.numeric(Pos)) %>% select(-Pos)
+
+XY %>% ggplot(aes(x = Bright , y = Avg_bright)) + 
+  geom_abline(intercept = 0, slope = 1, linetype="dashed", color = "blue", size = 0.7) +
+  geom_errorbarh(aes(xmin = Bright - Err, xmax = Bright + Err), size = 0.4, alpha = 0.5, color = "blue") +
+  geom_errorbar(aes(ymin = Avg_bright - Prop_err, ymax = Avg_bright + Prop_err), size = 0.4, alpha = 0.5, color = "red") +
+  geom_point(alpha = 0.5, size = 1.5) +
+  labs(title = "Multi variant and single variant comparison") +
+  ylab("Brightness (Mean over multiple variant)") +
+  xlab("Brightness (Single variant)") +
+  theme_bw()
+```
+
+The plot shows the comparison between the effect of single mutation and multiple mutations to the local fitness of avGFP, which was estimated by measuring the fluorescence levels of genotypes obtained by random mutagenesis. The blue dashed diagonal line rapresents the theoretical line where the fitness of the two groups is the same. We can see that the data points are shifted to the bottom right of the plot, indicating that the genotypes with multiple missense mutations are more likely to show a reduced fitness compared to genotypes with single mutation. One explaination is that these genotypes exhibit negative epistasis, where combination of neutral mutations had a deleterious effect on the protein, or that the cumulative effect of slightly deleterious mutations decreased the protein stability, therefore reducing the fluorescence. Also, we can observe that few data points are above the diagonal line, indicating the presence of positive epistasis. In these few cases the negative effect of a mutation was partially compensated by other mutations, which partially restored the fluorescence signal.
+
+__Next, pick 2 amino acids from your first and last name, respectively -> AA1, AA2. Visualise the distributions of mutations from AA1 and from AA2 to all other amino acids across all positions in the sequence. Then do the same for mutations from any amino acid into AA1 and AA2 - do they differ? What would you expect based on biochemistry vs. What do you observe? For synonymous mutations? For missense mutations?__
+
+```{r echo=FALSE, message=FALSE}
+# Compute min and max median brigthness for synonymous mutations
+synonymous_bright <- synonymous_mut %>% summarise(min_bright = min(medianBrightness), 
+                                                  max_bright = max(medianBrightness),
+                                                  avg_bright = mean(medianBrightness))
+
+# Subset, convert to long format, and plot the 4 distributions
+to_long_format <- function(bright, labels, AA, type){
+  bright %>% as_tibble() %>%
+    mutate(Lab = rep(labels, length(bright)),
+           AA = rep(AA, length(bright)),
+           Type = rep(type, length(bright))) %>% rename(Bright = "value")
+}
+
+plot_aa_distributions <- function(AA1, AA2, bright_df, synonym_bright_df = synonymous_bright){
+  # Subset
+  AA1_to_all <- summary_df[summary_df$WT == AA1, "Avg_bright"]
+  AA2_to_all <- summary_df[summary_df$WT == AA2, "Avg_bright"]
+  all_to_AA1 <- summary_df[summary_df$Mut == AA1, "Avg_bright"]
+  all_to_AA2 <- summary_df[summary_df$Mut == AA2, "Avg_bright"]  
+  # Generate a long format dataframe
+  df_long <- rbind(to_long_format(bright = AA1_to_all, labels = paste(AA1, "to all"), AA = AA1, type = "AA_to_all"),
+                   to_long_format(bright = AA2_to_all, labels = paste(AA2, "to all"), AA = AA2, type = "AA_to_all"),
+                   to_long_format(bright = all_to_AA1, labels = paste("All to", AA1), AA = AA1, type = "All_to_AA"),
+                   to_long_format(bright = all_to_AA2, labels = paste("All to", AA2), AA = AA2, type = "All_to_AA"))
+  # Plot
+  ggplot(df_long, aes(x = Bright, fill = Lab)) + 
+  geom_density(alpha = 0.4) + 
+  geom_vline(xintercept = c(synonym_bright_df$min_bright, 
+                            synonym_bright_df$max_bright), linetype = "dashed", col = "red") +
+  geom_vline(xintercept = synonym_bright_df$avg_bright, linetype = "dashed", col = "blue") +
+  labs(title = paste("Brightness distribution from and to", AA1, "and", AA2, "amino acids")) +
+  scale_fill_brewer(palette = "Dark2") +
+  facet_wrap(~Type) +
+  theme_bw()
+}
+
+plot_aa_distributions(AA1 = "S", AA2 = "P")
+``` 
+
+The red dashed lines rapresent the minimum and the maximum brightness of protein sequences resulting from synonymous mutations, while the blue dashed line rapresent their average brightness. The left side of the plot shows the distribution of the brightness measured in variants where the amino acid serine (S, pink) and proline (P, purple) mutated to each other amino acids. The right side shows the distribution of the brightness in variants where each amino acid mutated to serine (S, orange) and proline (P, green). Identical single nucleotide variants were averaged between protein sequences, and the brightness was also averaged across all contexts.   
+We can see that different peaks are present, which might rapresent the effect of mutations where the amino acid changed into another one within the same or a different group. In fact, if an amino acid mutates into another one within the same group, since they share similar properties, we expect that the stability of the protein is less affected than what we would observe if the amino acid is mutated into another one of a different group. In particular, apart from mutations involving proline as wild-type amino acid, it is possible to observe that three peaks are present in each distribution. The central peak might rapresent mutations to amino acids with partially shared properties whose effect was small, while the peak on the left rapresent significantly deleterious mutations, probably involing buried residues. Lastly, the peak on the right rapresent mutations to amino acids that did not have a deleterious effect on the fluorescence. In fact, it corresponds to the same brightness of proteins resulting from synonymous mutations.  
+Regarding the mutations involing proline, we can see that they are more deleterious than mutations involving serine. This might be explained by the special structure of the proline amino acid, which affect the protein secondary structure. In fact, cause of the distinctive cyclic structure of its side chain, proline is the least flexible between the amino acids and thus it gives conformational rigidity to the protein. Also, if inserted in the middle of apha helices and beta sheets, it can disrupt the secondary structure of the protein. Therefore, mutations from and to proline usually have a large impact on protein stability. Meanwhile, serine is a slightly polar amino acid which is consider neutral in regard to mutations. It has a small size and it can reside both within the interior of a protein, or on the protein surface. 
+
+
+## Task 3: summary matrix
+
+__Summarise the results across all variants in a 20x20 matrix showing the wild-type and target amino acids, as we did in the exercises in class. Submit a plot of the matrix (see e.g. ex. 3) as part of your homework assignment.__
+
+```{r echo=FALSE, message=FALSE}
+# Create a long format dataframe with average brigthness for each mutation present in the data
+matrix_long <- summary_df %>% mutate(WT_Mut = gsub("\\d", "", Mut_ID)) %>% 
+  group_by(WT_Mut) %>% summarise(Bright = mean(Avg_bright)) %>% 
+  mutate(WT = gsub(".$", "", WT_Mut, perl = TRUE), 
+         Mut = gsub("^.", "", WT_Mut, perl = TRUE)) %>% select(-WT_Mut)
+
+# Add NA to mutations that can't occurs (show gray diagonal line in the heatmap matrix)
+matrix_long <- rbind(matrix_long, data.frame(WT = colnames.by.AA,
+                                             Mut = colnames.by.AA,
+                                             Bright = rep(NA, length(colnames.by.AA)))) %>% 
+               mutate(Bright = ifelse(WT == Mut, NA, Bright))
+
+# Order the AAs
+matrix_long$WT <- factor(matrix_long$WT, levels = colnames.by.AA) 
+matrix_long$Mut <- factor(matrix_long$Mut, levels = colnames.by.AA)
+
+# Plot heatmap
+plot_heatmap <- function(df_long){
+  df_long %>% 
+    ggplot(aes(y = WT, x = Mut, fill = Bright)) + 
+    geom_tile() +
+    labs(title = "Brightness across all variants",
+         fill = "Brightness") +
+    scale_fill_gradientn(colours = c("white", "yellow", "red"), values = c(0, 0.5, 1)) +
+    theme_bw() + 
+    theme(legend.position = "right") 
+}
+
+plot_heatmap(matrix_long)
+```
+
+
+## Task 4: compare to the other GFP mutagenesis dataset
+
+### Task 4.1
+
+__Load in the native DNA from exercise 1. Compare it to the nativeDNA included above (e.g. by pairwise sequence alignment), then translate both sequences to protein and compare those. Write a short paragraph describing what you observe.__
+
+```{r echo=FALSE, message=FALSE}
+nativeDNA_ex2 <- readDNAStringSet("native_DNA.fa")
+nativeProtein_ex2 <- translate(nativeDNA_ex2)
+
+# Pairwise alignment
+dna_alignment <- pairwiseAlignment(DNAString(nativeDNA), nativeDNA_ex2)
+protein_alignment <- pairwiseAlignment(nativeProtein, nativeProtein_ex2)
+
+# Visualize DNA and proteins alignment
+print_alignment <- function(alignment, chunks_length = 100){
+  p <- strsplit(as.character(alignedPattern(alignment)), split = "")[[1]]
+  s <- strsplit(as.character(alignedSubject(alignment)), split = "")[[1]]
+  # Output the alignment in parallel chunks
+  for (i in seq(from = 1, to = length(p), chunks_length)){
+    j = i + chunks_length
+    if (j > length(p)){
+      j = length(p)
+    }
+    c(print(i), 
+      print(paste(p[i:j], collapse = "")), 
+      print(paste(s[i:j], collapse = "")), writeLines("\n"))
+  }
+  # Output the position starting the local alignment
+  alg = FALSE
+  for (n in seq(length(p))){
+    if (p[n] == s[n] & alg == FALSE){
+      print(paste("Alignment starting at position", n, "of the pattern"))
+      writeLines("\n")
+      alg = TRUE
+    }
+  }
+}
+
+print("DNA alignment:")
+writeLines("\n")
+print_alignment(dna_alignment, chunks_length = 80)
+print("Protein alignment:")
+writeLines("\n")
+print_alignment(protein_alignment, chunks_length = 80)
+```
+
+We can see that some mismatches are present in both, the alignment of DNA and protein sequences. The DNA alignment start at position 397 of the native DNA used as reference for the Sarkisyan dataset, while the alignment of the proteins start at position 133. This information is important to compare the variants present in Sarkisyan and GFP mutagenesis datasets. In order to do that, we can add 132 to the positions of the GFP mutagenesis variants. 
+
+### Task 4.2
+
+__Load in the GFP dataset we parsed in exercise 2, including the cleanup steps, translation to protein and identification of differences to the wt sequence. How many variants (wt, position, mut.aa) are observed in both datasets? Only observed in the Sarkisyan dataset? Only observed in the dataset we worked with in class?__
+
+```{r echo=FALSE, results="hide", message=FALSE}
+## Load data
+
+# Dim and bright datasets
+bright_gfp = read.table("bright_GFP_beads.counts", stringsAsFactors=F)
+dim_gfp = read.table("dim_GFP_beads.counts", stringsAsFactors=F)
+
+colnames(bright_gfp) <- c("occurrence", "sequence")
+colnames(dim_gfp) <- c("occurrence", "sequence")
+
+## Data cleaning
+ngs_data_ex2 <- list(bright = clean_data(ngs = bright_gfp, dna_wt = nativeDNA_ex2, threshold = 4),
+                     dim = clean_data(ngs = dim_gfp, dna_wt = nativeDNA_ex2, threshold = 4))
+
+## Get differences to WT
+parser_diff <- function(df){
+  df$medianBrightness <- rep(NA, nrow(df))
+  df$stdErr <- rep(NA, nrow(df))
+  return(df)
+}
+
+ngs_data_ex2$bright <- parser_diff(ngs_data_ex2$bright)
+ngs_data_ex2$dim <- parser_diff(ngs_data_ex2$dim)
+
+ngs_data_ex2$bright_summary <- mut_summary(ngs = ngs_data_ex2$bright, 
+                                           protein_wt = nativeProtein_ex2) %>% select(-Bright, -Err)
+ngs_data_ex2$dim_summary <- mut_summary(ngs = ngs_data_ex2$dim, 
+                                        protein_wt = nativeProtein_ex2) %>% select(-Bright, -Err)
+
+## Get SNVs present in GFP and Sarkisyan datasets
+
+# Updated the position and the variant ID according to the alignment
+ngs_data_ex2$bright_summary <- ngs_data_ex2$bright_summary %>% 
+                               mutate(Pos = Pos + 132, Mut_ID = paste(WT, Pos, Mut, sep = ""))
+ngs_data_ex2$dim_summary <- ngs_data_ex2$dim_summary %>% 
+                            mutate(Pos = Pos + 132, Mut_ID = paste(WT, Pos, Mut, sep = ""))
+
+# Variants present in GFP datasets
+SNV_in_both_gfp <- unique(ngs_data_ex2$dim_summary$Mut_ID) %in% unique(ngs_data_ex2$bright_summary$Mut_ID)
+SNV_in_both_gfp <- unique(ngs_data_ex2$dim_summary$Mut_ID)[SNV_in_both_gfp]
+
+# Variants present in both GFP and Sarkisyan
+SNV_in_all_data <- summary_df$Mut_ID[summary_df$Mut_ID %in% SNV_in_both_gfp]
+writeLines("\n")
+paste("Variants present in both GFP and Sarkisyan datasets:", length(SNV_in_all_data))
+paste("Variants present only in Sarkisyan datasets", sum(!(summary_df$Mut_ID %in% SNV_in_both_gfp)))
+paste("Variants present only in GFP datasets:", sum(!(SNV_in_both_gfp %in% summary_df$Mut_ID)))
+```
+
+* Variants present in both GFP and Sarkisyan datasets: 465.          
+* Variants present only in Sarkisyan datasets 1346.         
+* Variants present only in GFP datasets: 59.         
+
+### Task 4.3
+
+__For the variants found in both datasets, create a scatterplot to compare their averaged medianBrightness (see task 2) vs. log(bright/dim) ratio. Briefly describe what trends you observe, and whether those are what you would expect. Submit the scatter plot and discussion as part of your hand-in.__
+
+```{r echo=FALSE, message=FALSE}
+# Subset and compute the frequency
+ngs_data_ex2$bright_summary <- ngs_data_ex2$bright_summary %>% 
+                               filter(Mut_ID %in% SNV_in_all_data) %>% 
+                               group_by(Mut_ID) %>% count() %>% rename("Freq_bright" = "n") %>%
+                               arrange(Mut_ID)
+ngs_data_ex2$dim_summary <- ngs_data_ex2$dim_summary %>% 
+                               filter(Mut_ID %in% SNV_in_all_data) %>% 
+                               group_by(Mut_ID) %>% count() %>% rename("Freq_dim" = "n") %>%
+                               arrange(Mut_ID)
+
+summary_GFP <- data.frame(ngs_data_ex2$bright_summary, Freq_dim = ngs_data_ex2$dim_summary$Freq_dim)
+
+# Compute the relative frequency
+summary_GFP$Freq_bright <- summary_GFP$Freq_bright / sum(summary_GFP$Freq_bright)
+summary_GFP$Freq_dim <- summary_GFP$Freq_dim / sum(summary_GFP$Freq_dim)
+
+# Compute the log odds
+summary_GFP <- summary_GFP %>% mutate(Log_ratio = log10(Freq_bright / Freq_dim))
+
+# Merge the two datasets
+merged_df <- cbind(summary_GFP %>% select(Mut_ID, Log_ratio), 
+                   summary_df[summary_df$Mut_ID %in% SNV_in_both_gfp,] %>% 
+                       arrange(Mut_ID) %>% select(Avg_bright))
+
+# Scatter plot
+merged_df %>% ggplot(aes(x = Avg_bright , y = Log_ratio)) + 
+  geom_point(alpha = 0.6, size = 1.5) +
+  geom_smooth(method = lm) +
+  labs(title = "Averaged medianBrightness VS dim and bright log ratio") +
+  ylab("Log ratio (dim and bright experiment)") +
+  xlab("Average brightness (Sarkisyan experiment)") +
+  theme_bw()
+```
+
+We can observe that there is a positive linear relationship between the log ratio of the GFP experiment (dim and bright dataset) and the average brigthness of the Sarkisyan one. This was expected because the variants that caused a fitness reduction in the GFP experiment were more likely to show the same deleterious effect in the Sarkisyan one, and the same was expected for variants that shown a neutral effect. We can see that this is not always true, and this might be due to noise and to the presence of different combination of mutations (Sarkisyan proteins are longer), which might have a very different effect on the fitness of the genotypes.
