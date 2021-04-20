@@ -20,7 +20,7 @@ Reports and code for [Advanced Bioinformatics for NGS](https://kurser.ku.dk/cour
 * [Report](https://github.com/St3451/Advanced_Bioinformatics_for_NGS/blob/master/Assignment3/assignment3_stefano_pellegrini.pdf)
 * [Code](https://github.com/St3451/Advanced_Bioinformatics_for_NGS/blob/master/Assignment3/assignment3_stefano_pellegrini.RMD)
 
-### 4. comparative genomics, phylogenomics, and comparative transcriptomics 
+### 4. Comparative genomics, phylogenomics, and comparative transcriptomics 
 
 * [Comparative genomics](https://github.com/St3451/Advanced_Bioinformatics_for_NGS/blob/master/Assignment4/assignment4_1_stefano_pellegrini.pdf)
 * [Phylogenomics](https://github.com/St3451/Advanced_Bioinformatics_for_NGS/blob/master/Assignment4/assignment4_2_stefano_pellegrini.pdf)
